@@ -16,7 +16,7 @@ from torch import nn
 from torch.nn import Module, Parameter
 import torch.nn.functional as F
 import torch.nn.init as init
-from numba import jit
+#from numba import jit
 from entmax import entmax_bisect
 
 from utils import build_graph, get_overlap
@@ -28,7 +28,7 @@ class LayerNorm(Module):
         self.weight = Parameter(torch.ones(hidden_size))
         self.bias = Parameter(torch.zeros(hidden_size))
         self.variance_epsilon = eps
-    
+
     def forward(self, x):
         u = x.mean(-1, keepdim=True)
         s = (x-u).pow(2).mean(-1, keepdim=True)
@@ -52,13 +52,13 @@ class GNN(Module):
 
         self.linear_edge_in = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.linear_edge_out = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
-    
+
     def GNNCell(self, A, hidden):
         """ Calculate each GNN layer."""
         # A: (B, S, 2S) 圖的鄰接矩陣
         # hidden: (B, S, 2D) 用戶序列的embedding (item embedding + position embedding)
         input_in = torch.matmul(A[:, :, :A.shape[1]], self.linear_edge_in(hidden)) + self.b_iah # (B, S, 2D) = (B, S, S) * {(B, S, 2D) * (B, 2D, 2D)}
-        input_out = torch.matmul(A[:, :, A.shape[1]:2*A.shape[1]], self.linear_edge_out(hidden)) + self.b_oah # (B, S, 2D) 
+        input_out = torch.matmul(A[:, :, A.shape[1]:2*A.shape[1]], self.linear_edge_out(hidden)) + self.b_oah # (B, S, 2D)
         inputs = torch.cat([input_in, input_out], 2) # (B, S, 4D)
         gi = F.linear(inputs, self.w_ih, self.b_ih) # (B, S, 6D) = (B, S, 4D) * (B, 6D, 4D)^T
         gh = F.linear(hidden, self.w_hh, self.b_hh) # (B, S, 6D) = (B, S, 2D) * (B, 6D, 2D)^T
@@ -68,14 +68,14 @@ class GNN(Module):
         input_gate = torch.sigmoid(i_i + h_i)
         new_gate = torch.tanh(i_n + reset_gate * h_n)
         hy = (1 - input_gate) * hidden + input_gate * new_gate # newgate + inputgate * (hidden - newgate)
-        
+
         return hy
-    
+
     def forward(self, A, hidden):
         for i in range(self.step):
             hidden = self.GNNCell(A, hidden)
         return hidden
-    
+
 class FindNeighbors(Module):
     def __init__(self, opt, hidden_size) -> None:
         super(FindNeighbors, self).__init__()
@@ -107,7 +107,7 @@ class FindNeighbors(Module):
         neighbor_sess = torch.sum(cos_sim * sess_topk, 1) # (B, D)
         neighbor_sess = self.dropout40(neighbor_sess)
         return neighbor_sess
-    
+
 class RelationGAT(Module):
     def __init__(self, batch_size, hidden_size=100) -> None:
         super(RelationGAT, self).__init__()
@@ -146,9 +146,10 @@ class RelationGAT(Module):
         for i in torch.arange(items.shape[0]):
             seq_h.append(torch.index_select(item_embedding, 0, items[i])) # (B, S, D)
         seq_h1 = (torch.tensor([items.cpu().detach().numpy() for items in seq_h])).cuda() # (B, S, D)
-        
+
         len = seq_h1.shape[1] # S
-        relation_emb_gcn = torch.sum(seq_h1, 1) # (B, D) Aggregate node info. --> Get session representation
+        relation_emb_gcn = torch.sum(seq_h1, 1) # Aggregate node info. (B,S,D) --> Get session representation (B,D)
+        A = A + torch.eye(A.size(0)).cuda() # A=(A+I)
         DA = torch.matmul(D, A) # (B, B)  D^-1*(A+I)
         relation_emb_gcn = torch.matmul(DA, relation_emb_gcn) # (B, D)
         relation_emb_gcn = relation_emb_gcn.unsqueeze(1).expand(relation_emb_gcn.shape[0], len, relation_emb_gcn.shape[1]) # (B, S, D)
@@ -164,7 +165,7 @@ class RelationGAT(Module):
         l_c = (c / torch.norm(c, dim=-1).unsqueeze(1)) # Normalize (B, D)
 
         return l_c
-    
+
 
 class LastAttention(Module):
     def __init__(self, hidden_size, heads, dot, l_p, last_k=3, use_attn_conv=False, area_func=None):
@@ -186,7 +187,7 @@ class LastAttention(Module):
         # self.ccattn = area_func
         self.last_layernorm = torch.nn.LayerNorm(self.hidden_size, eps=1e-8)
         self.reset_parameters()
-    
+
     def reset_parameters(self):
         for weight in self.parameters():
             weight.data.normal_(std=0.1)
@@ -198,7 +199,7 @@ class LastAttention(Module):
         q2 = self.linear_two(hidden).view(-1, hidden.size(1), self.hidden_size // self.heads)
         assert not torch.isnan(q0).any()
         assert not torch.isnan(q1).any()
-        
+
         alpha = torch.sigmoid(torch.matmul(q0, q1.permute(0, 2, 1)))
         assert not torch.isnan(alpha).any()
         alpha = alpha.view(-1, q0.size(1) * self.heads, hidden.size(1)).permute(0, 2, 1)
@@ -213,7 +214,7 @@ class LastAttention(Module):
         a = torch.sum(
             (alpha.unsqueeze(-1) * q2.view(hidden.size(0), -1, self.heads, self.hidden_size // self.heads)).view(
                 hidden.size(0), -1, self.hidden_size) * mask.view(mask.shape[0], -1, 1).float(), 1)
-        
+
         return a, alpha
 
 class SessionGraph(Module):
@@ -290,31 +291,31 @@ class SessionGraph(Module):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def add_position_embedding(self, seq_hidden):
+#    def add_position_embedding(self, seq_hidden):
         """Add position embeddings.
-        
+
         Create item and position embedding respectively, and then concate them together.
 
         Args:
             seq_hidden: a batch of sequence, shape -> (B, len_max, D)
-        
+
         Return:
             sequence_embeddings: added position embeddings' sequence_emb, shape -> (B, S, 2D)
         """
 
-        batch_size = seq_hidden.shape[0] # B
-        seq_len = seq_hidden.shape[1] # len_max
+#        batch_size = seq_hidden.shape[0] # B
+#        seq_len = seq_hidden.shape[1] # len_max
 
-        position_ids = torch.arange(seq_len, dtype=torch.long, device=seq_hidden.device) # (len_max, )
-        position_ids = torch.flip(position_ids, [0]) # (len_max, ) reverse position
-        position_ids = position_ids.unsqueeze(0).repeat(batch_size, 1) # (B, len_max)
-        position_embeddings = self.pos_embedding(position_ids) # (B, len_max, D)
+#        position_ids = torch.arange(seq_len, dtype=torch.long, device=seq_hidden.device) # (len_max, )
+#        position_ids = torch.flip(position_ids, [0]) # (len_max, ) reverse position
+#        position_ids = position_ids.unsqueeze(0).repeat(batch_size, 1) # (B, len_max)
+#        position_embeddings = self.pos_embedding(position_ids) # (B, len_max, D)
         # item_embeddings = self.embedding(seq_hidden) # (B, S, D)
 
-        sequence_embeddings = torch.cat((seq_hidden, position_embeddings), -1) # (B, len_max, 2D)
-        sequence_embeddings = self.LayerNorm(sequence_embeddings)
+#        sequence_embeddings = torch.cat((seq_hidden, position_embeddings), -1) # (B, len_max, 2D)
+#        sequence_embeddings = self.LayerNorm(sequence_embeddings)
 
-        return sequence_embeddings
+#        return sequence_embeddings
 
     def get_alpha(self, x=None, seq_len=70, number=None):
         # X: (B, 1, D)
@@ -333,7 +334,7 @@ class SessionGraph(Module):
         alpha_ent = self.add_value(alpha_ent).unsqueeze(2) # (B, H, 1, 1)
         alpha_ent = alpha_ent.expand(-1, -1, seq_len, -1) # (B, H, len_max+1, 1)
         return alpha_ent
-    
+
     def add_value(self, value):
         # I think this module is to replace 1 with 1.00001 (Lin_chia)
         # if value = 1, it equals to use softmax
@@ -377,7 +378,7 @@ class SessionGraph(Module):
         x_n = att_v[:, :-1, :] # (B, len_max, D)
 
         return c, x_n
-    
+
     def global_attention(self, target, k, v, mask=None, alpha_ent=1):
         alpha = torch.matmul(torch.relu(k.matmul(self.atten_w1) + target.matmul(self.atten_w2) + self.atten_bias), self.atten_w0.t()) # (B, len_max, 1)
         if mask is not None: # (B, len_max)
@@ -393,7 +394,7 @@ class SessionGraph(Module):
             c = self.dropout(torch.selu(self.w_f(torch.cat((global_s, target_s), 2))))
         else:
             c = torch.selu(self.w_f(torch.cat((global_s, target_s), 2)))
-        
+
         c = c.squeeze() # (B, D)
         l_c = (c / torch.norm(c, dim=-1).unsqueeze(1)) # Normalize (B, D)
         return l_c
@@ -404,10 +405,10 @@ class SessionGraph(Module):
         # sess_final = self.linear_transform(torch.cat((grp_sess_hidden, intra_sess_hidden, inter_sess_hidden), 1)) # (B, 3D)
         # sess_final = self.linear_transform(torch.cat((grp_sess_hidden, sess_final), 1)) # (B, 2D)
         sess_final = intra_sess_hidden + inter_sess_hidden
-        
+
         # grp_weight = self.grp_sess_weight(grp_sess_hidden) # (B, 1) # torch.sigmoid()
         grp_weight = torch.sigmoid(self.grp_sess_weight(grp_sess_hidden)) # (B, 1)
-        
+
         sess_final = sess_final + grp_weight * grp_sess_hidden
         # Dropout & Normalize
         if self.is_dropout:
@@ -437,16 +438,16 @@ class SessionGraph(Module):
             hts.append(torch.mean(torch.stack(
                 [grp_hidden[torch.arange(mask.size(0)).long(), torch.clamp(lengths - (j + 1), -1, 1000)] for j in
                  range(i + 1)]), dim=0).unsqueeze(1))
-        
+
         hts = torch.cat(hts, dim=1) # (B, last_k, D)
-        hts = hts.div(torch.norm(hts, p=2, dim=1, keepdim=True) + 1e-12) 
+        hts = hts.div(torch.norm(hts, p=2, dim=1, keepdim=True) + 1e-12)
 
         grp_hidden = grp_hidden[:, :mask.size(1)] # (B, len_max, D)
         ais, weights = self.mattn(hts, grp_hidden, mask)
 
         grp_sess = self.linear_grp(torch.cat((ais.squeeze(), ht0), 1))
-        grp_sess = grp_sess.div(torch.norm(grp_sess, p=2, dim=1, keepdim=True) + 1e-12) 
-        
+        grp_sess = grp_sess.div(torch.norm(grp_sess, p=2, dim=1, keepdim=True) + 1e-12)
+
 
         # Sparse Global Attention
         alpha_global = self.get_alpha(x = target_emb, number = 1) # (B, 1, 1)
@@ -456,8 +457,8 @@ class SessionGraph(Module):
         global_c = self.global_attention(q, k, v, mask=mask, alpha_ent=alpha_global) # (B, 1, D)
         # Get integrated session representations
         sess_final = self.decoder(global_c, target_emb) # (B, D)
-        
-        sess_final = self.fusion_module(sess_final, relation_emb, grp_sess)
+
+        sess_final = self.fusion_module(sess_final, relation_emb, grp_sess) #(B, D)
 
         # SIC
         neighbor_sess = self.FindNeighbor(sess_final)
@@ -474,7 +475,7 @@ class SessionGraph(Module):
 
         seq_emb = self.embedding(inputs) # (B, S, D)
         hidden = self.gnn(A, seq_emb) # (B, S, D)
-        
+
         # Get embedding of each item in the session(last hidden layer)
         get = lambda i: hidden[i][alias_inputs[i]]
         seq_hidden_gnn = torch.stack([get(i) for i in torch.arange(len(alias_inputs)).long()]) # (B, len_max, D)
@@ -489,12 +490,12 @@ class SessionGraph(Module):
         relation_emb = self.RelationGraph(self.embedding.weight, inputs, A_hat, D_hat, target_emb)
 
         return seq_grp_hidden_gnn, seq_hidden_gnn, target_emb, x_n, relation_emb
-    
+
     def forward(self, batch):
         A, re_items = build_graph(batch['items'].cpu().numpy(), batch['inputs'].cpu().numpy(), batch['alias_inputs'])
         A_hat, D_hat = get_overlap(re_items)
         # A_hat, D_hat = get_overlap(batch['items'])
-        
+
         A = torch.Tensor(A).cuda().float() # (B, S, 2S) in+out
         items = torch.Tensor(re_items).cuda().long() # (B, S)
         A_hat = torch.Tensor(A_hat).cuda() # (B, B)
@@ -507,6 +508,5 @@ class SessionGraph(Module):
 
         scores = self.compute_scores(seq_grp_hidden, hidden, mask, target_emb, att_hidden, relation_emb)
 
-        
+
         return targets, scores
-        
