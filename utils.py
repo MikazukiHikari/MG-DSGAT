@@ -24,7 +24,7 @@ def get_multi_seed(n_seeds: int=5):
     return seeds
 
 
-def split_validation(train_set: tuple, valid_portion: float) -> (tuple, tuple):
+def split_validation(train_set: tuple, valid_portion: float):# -> (tuple, tuple):
     """Split the training set into training set and validation set."""
     train_set_x, train_set_y = train_set
     n_samples = len(train_set_x)
@@ -49,7 +49,7 @@ def handle_data(inputs, train_len=None):
 
 def build_graph(items, inputs, alias_inputs):
     """Build graph for each session and shorten the item list in the batch.
-    
+
     Args:
         items: item list of each session. (B, len_max)
         inputs: input session list. (B, len_max)
@@ -92,16 +92,16 @@ def build_graph(items, inputs, alias_inputs):
         u_A_out = np.divide(u_A.transpose(), u_sum_out)
         u_A = np.concatenate([u_A_in, u_A_out]).transpose()
         adj.append(u_A)
-    
+
     return adj, re_items
 
 
 def get_overlap(sessions):
     """Get overlap matrix and degree matrix.
-        
+
     Args:
         sessions: a batch of sessions. (B, S)
-    
+
     Return:
         matrix: overlap matrix.
         degree: degree matrix.
