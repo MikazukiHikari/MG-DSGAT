@@ -109,7 +109,7 @@ class FindNeighbors(Module):
         return neighbor_sess
 
 class RelationGAT(Module):
-    def __init__(self, batch_size, hidden_size=100) -> None:
+    def __init__(self, batch_size, hidden_size=100, num_heads=4) -> None:
         super(RelationGAT, self).__init__()
         self.batch_size = batch_size
         self.dim = hidden_size
@@ -119,6 +119,11 @@ class RelationGAT(Module):
         self.atten_w1 = nn.Parameter(torch.Tensor(self.dim, self.dim))
         self.atten_w2 = nn.Parameter(torch.Tensor(self.dim, self.dim))
         self.atten_bias = nn.Parameter(torch.Tensor(self.dim))
+
+        self.num_heads = num_heads  # Number of attention heads
+        self.attention_heads = nn.ModuleList([nn.Linear(hidden_size, hidden_size) for _ in range(num_heads)])
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.softmax = nn.Softmax(dim=1)
 
     def get_alpha(self, x):
         # x: (B, 1, D)
@@ -139,7 +144,30 @@ class RelationGAT(Module):
         c = torch.matmul(alpha.transpose(1, 2), v) # (B, 1, D)
         return c
 
-    def forward(self, item_embedding, items, A, D, target_embedding):
+    def attention(self, h, adj_matrix):
+        """
+        Calculate attention coefficients using the overlap matrix A (B, B).
+        h: (B, D) hidden representations of sessions
+        adj_matrix: (B, B) overlap adjacency matrix
+        """
+        # Multi-head attention: for each head, calculate attention scores
+        attn_coefficients = []
+        for head in self.attention_heads:
+            Wh = head(h)  # Apply transformation to each session embedding (B, D)
+            e = torch.matmul(Wh, Wh.transpose(0, 1))  # Attention coefficients (B, B)
+            e = self.leaky_relu(e)
+
+            # Mask out entries in the adjacency matrix where there's no overlap (i.e., where A is 0)
+            e = e.masked_fill(adj_matrix == 0, float('-inf'))
+            attn_weights = self.softmax(e)  # Softmax over the attention scores
+            attn_coefficients.append(attn_weights)
+
+        # Combine multi-head attention results
+        attn_coefficients = torch.stack(attn_coefficients, dim=0)  # Shape: (num_heads, B, B)
+        return attn_coefficients.mean(dim=0)  # Average over all heads to get final attention weights (B, B)
+
+
+    def forward(self, item_embedding, items, A, D_1, target_embedding):
         # item_embedding: (N, D), items: (B, S), target_embedding: (B, 1, D)
         # get item embedding of each session
         seq_h = []
@@ -148,17 +176,33 @@ class RelationGAT(Module):
         seq_h1 = (torch.tensor([items.cpu().detach().numpy() for items in seq_h])).cuda() # (B, S, D)
 
         len = seq_h1.shape[1] # S
-        relation_emb_gcn = torch.sum(seq_h1, 1) # Aggregate node info. (B,S,D) --> Get session representation (B,D)
-        A = A + torch.eye(A.size(0)).cuda() # A=(A+I)
+        """
+        relation_emb_gcn = torch.sum(seq_h1, 1) # (B, D) Aggregate node info. --> Get session representation
         DA = torch.matmul(D, A) # (B, B)  D^-1*(A+I)
         relation_emb_gcn = torch.matmul(DA, relation_emb_gcn) # (B, D)
         relation_emb_gcn = relation_emb_gcn.unsqueeze(1).expand(relation_emb_gcn.shape[0], len, relation_emb_gcn.shape[1]) # (B, S, D)
+        """
+        #(512,27,256)(B,S,D)
+
+        # Aggregate node info -> session representation (B, D)
+        session_embeddings = torch.sum(seq_h1, 1)
+
+        # Use the overlap matrix A as the adjacency matrix in GAT
+        attention_weights = self.attention(session_embeddings, A)  # (B, B)
+
+        # Update session representations using attention weights (B, D)
+        updated_session_embeddings = torch.matmul(attention_weights, session_embeddings)  # (B, D)
+
+        relation_emb_gat = updated_session_embeddings.unsqueeze(1).expand(updated_session_embeddings.shape[0], len, updated_session_embeddings.shape[1]) # (B, S, D)
+
 
         # target_emb = self.w_f(target_embedding) # (B, 1, D)
         alpha_line = self.get_alpha(x = target_embedding) # (B, 1, 1)
         q = target_embedding # (B, 1, D)
-        k = relation_emb_gcn # (B, S, D)
-        v = relation_emb_gcn # (B, S, D)
+        k = relation_emb_gat # (B, S, D)
+        v = relation_emb_gat # (B, S, D)
+        #k = updated_session_embeddings.unsqueeze(1)  # (B, 1, D)
+        #v = updated_session_embeddings.unsqueeze(1)  # (B, 1, D)
 
         line_c = self.tglobal_attention(q, k, v, alpha_ent=alpha_line) # (B, 1, D)
         c = torch.selu(line_c).squeeze() # (B, D)
