@@ -37,7 +37,7 @@ def evaluate(model, data_loader, device, Ks=[5, 10, 20]):
             val_loss = nn.CrossEntropyLoss()(scores, targets-1)
             total_val_loss += val_loss.item()
             avg_val_loss = total_val_loss / (step + 1)
-            
+
             sub_scores = scores.topk(20)[1]
             targets = targets.unsqueeze(1)
             num_samples += batch_num
@@ -48,7 +48,7 @@ def evaluate(model, data_loader, device, Ks=[5, 10, 20]):
                 hits = hits.float().cpu()
                 results[f'HR@{K}'] += hits.numel()
                 results[f'MRR@{K}'] += hits.reciprocal().sum().item()
-        
+
         for metric in results:
             results[metric] = (results[metric] / num_samples) * 100
 
@@ -85,17 +85,18 @@ class Trainer:
 
             avg_train_loss = total_loss / (step + 1)
             avg_con_loss = total_con_loss / (step + 1)
-            
+
             # Logging Training & Evaluation Step Info.
             if step % int(len(self.train_loader) / 5 + 1) == 0:
                 print('Step[%d/%d]: Avg Train Loss: %.4f' % (step, len(self.train_loader), avg_train_loss))
-                # wandb.log({"Step_avg_train_loss": avg_train_loss})
-                
+                wandb.log({"Step_avg_train_loss": avg_train_loss})
+
                 # Logging Step Evaluation Info.
                 _, avg_val_loss = evaluate(self.model, self.valid_loader, self.device, Ks=self.Ks)
                 print('\tAvg Val Loss: %.4f' % (avg_val_loss))
-                # wandb.log({"Step_avg_val_loss": avg_val_loss})
+                wandb.log({"Step_avg_val_loss": avg_val_loss})
                 self.model.train()
+
 
         return avg_train_loss, avg_con_loss
 
@@ -105,35 +106,56 @@ class Trainer:
         bad_counter = 0
         results = defaultdict(float)
         max_result = defaultdict(float)
+        max_result_test = defaultdict(float)
         for K in self.Ks:
             max_result[f"HR@{K}"] = 0
             max_result[f"MRR@{K}"] = 0
+            max_result_test[f"HR@{K}"] = 0
+            max_result_test[f"MRR@{K}"] = 0
 
         for epoch in range(epochs):
             t = time.time()
+            #self.model.reset_attention_history()
             avg_train_loss, avg_con_loss = self._train_epoch()
             # Logging Train Info.
             print('Epoch:[%d/%d] Avg Train Loss: %.4f, Avg Con-Loss: %.4f' % (epoch+1, epochs, avg_train_loss, avg_con_loss))
-            # wandb.log({"epoch": epoch+1, "Epoch_avg_train_loss": avg_train_loss, "Epoch_avg_con_loss": avg_con_loss})
+            wandb.log({"epoch": epoch+1, "Epoch_avg_train_loss": avg_train_loss, "Epoch_avg_con_loss": avg_con_loss})
+            #self.model.print_avg_attention_weights()
 
             # Evaluation
             results, avg_val_loss = evaluate(self.model, self.valid_loader, self.device)
+            results_test, _ = evaluate(self.model, self.test_loader, self.device)
             self.model.scheduler.step()
 
             # Logging Evaluation Info.
             print(f'Avg Val Loss: {avg_val_loss}')
-            # wandb.log({"Epoch_avg_val_loss": avg_val_loss})
+            wandb.log({"Epoch_avg_val_loss": avg_val_loss})
             for K in self.Ks:
                 print(f'\tVal HR@{K}: {results[f"HR@{K}"]}, Val MRR@{K}: {results[f"MRR@{K}"]}')
-                # wandb.log({f"Val HR@{K}": results[f"HR@{K}"], f"Val MRR@{K}": results[f"MRR@{K}"]})
+                wandb.log({f"Val HR@{K}": results[f"HR@{K}"], f"Val MRR@{K}": results[f"MRR@{K}"]})
+            """
+            for K in self.Ks:
+                print(f'\tTest HR@{K}: {results_test[f"HR@{K}"]}, Test MRR@{K}: {results_test[f"MRR@{K}"]}')
+                wandb.log({f"Test HR@{K}": results_test[f"HR@{K}"], f"Test MRR@{K}": results_test[f"MRR@{K}"]})
+            """
 
-            any_better = False
+            any_better = 0
+            total_metric = 0
+            #print(results)
             for metric in results:
                 if results[metric] > max_result[metric]:
                     max_result[metric] = results[metric]
-                    any_better = True
-            
-            if any_better:
+                    any_better += 1
+                if results_test[metric] > max_result_test[metric]:
+                    max_result_test[metric] = results_test[metric]
+                total_metric += 1
+            """
+            for K in self.Ks:
+                print(f'\tMaxTest HR@{K}: {max_result_test[f"HR@{K}"]}, MaxTest MRR@{K}: {max_result_test[f"MRR@{K}"]}')
+                wandb.log({f"MaxTest HR@{K}": max_result_test[f"HR@{K}"], f"MaxTest MRR@{K}": max_result_test[f"MRR@{K}"]})
+            """
+
+            if any_better>(total_metric)/2:
                 bad_counter = 0
                 # save validation best model
                 BEST_PATH = './save_model/' + self.model_save_file + "_best_model.pt"
@@ -144,12 +166,12 @@ class Trainer:
                     # save after early stopping model
                     FINAL_PATH = './save_model/' + self.model_save_file + "_final_model.pt"
                     torch.save(self.model.state_dict(), FINAL_PATH)
-                    # wandb.log({"bad_counter": bad_counter})
+                    wandb.log({"bad_counter": bad_counter})
                     break
 
-            # wandb.log({"bad_counter": bad_counter})
+            wandb.log({"bad_counter": bad_counter})
             print('========= Epoch Elapsed Time: %.2fs =========' % (time.time() - t))
-        
+
         # Running Test
         tmp_final_test_result, _ = evaluate(self.model, self.test_loader, self.device)
         self.model.load_state_dict(torch.load(BEST_PATH))
@@ -157,7 +179,7 @@ class Trainer:
         for K in self.Ks:
             print(f'Final Test Result: HR@{K}: {tmp_final_test_result[f"HR@{K}"]}, MRR@{K}: {tmp_final_test_result[f"MRR@{K}"]}')
             print(f'Best Model Test Result: HR@{K}: {tmp_best_model_test_result[f"HR@{K}"]}, MRR@{K}: {tmp_best_model_test_result[f"MRR@{K}"]}')
-            # wandb.log({f"Final_Test_HR@{K}": tmp_final_test_result[f"HR@{K}"], f"Final_Test_MRR@{K}": tmp_final_test_result[f"MRR@{K}"]})
-            # wandb.log({f"Best_Model_Test_HR@{K}": tmp_best_model_test_result[f"HR@{K}"], f"Best_Model_Test_MRR@{K}": tmp_best_model_test_result[f"MRR@{K}"]})
-        
+            wandb.log({f"Final_Test_HR@{K}": tmp_final_test_result[f"HR@{K}"], f"Final_Test_MRR@{K}": tmp_final_test_result[f"MRR@{K}"]})
+            wandb.log({f"Best_Model_Test_HR@{K}": tmp_best_model_test_result[f"HR@{K}"], f"Best_Model_Test_MRR@{K}": tmp_best_model_test_result[f"MRR@{K}"]})
+
         return tmp_final_test_result, tmp_best_model_test_result

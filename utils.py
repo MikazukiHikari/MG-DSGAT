@@ -24,7 +24,7 @@ def get_multi_seed(n_seeds: int=5):
     return seeds
 
 
-def split_validation(train_set: tuple, valid_portion: float):# -> (tuple, tuple):
+def split_validation(train_set: tuple, valid_portion: float):
     """Split the training set into training set and validation set."""
     train_set_x, train_set_y = train_set
     n_samples = len(train_set_x)

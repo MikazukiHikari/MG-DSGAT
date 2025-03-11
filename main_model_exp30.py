@@ -67,11 +67,11 @@ def main():
         n_node = 60417
         opt.neighbor_n = 4
     elif opt.dataset == 'Tmall':
-        n_node = 40728 
+        n_node = 40728
         # opt.w_ne = 0.9
         opt.neighbor_n = 7
         opt.last_k = 3
-        opt.step = 2 
+        opt.step = 2
     elif opt.dataset == 'RetailRocket':
         n_node = 36969
     elif opt.dataset == 'Gowalla':
@@ -79,43 +79,43 @@ def main():
         opt.last_k = 4
     print(opt)
 
-    
+
 
     if opt.use_multi_seeds:
         seeds = get_multi_seed(3)
         for seed in seeds:
             seed = init_seed(seed)
             print(seed)
-        
+
             train_data = pickle.load(open('./datasets/' + opt.dataset + '/train.txt', 'rb'))
             train_data, valid_data = split_validation(train_data, opt.valid_portion)
             test_data = pickle.load(open('./datasets/' + opt.dataset + '/test.txt', 'rb'))
             test_data = DataSampler(opt, test_data, opt.len_session, train=False)
-            test_loader = torch.utils.data.DataLoader(test_data, num_workers=opt.num_workers, batch_size=opt.batchSize, 
+            test_loader = torch.utils.data.DataLoader(test_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                             shuffle=False, pin_memory=False)
-            
+
             model_save_file = EXP_NAME + "_" + opt.dataset + '_' + str(opt.batchSize) + '_seed_' + str(opt.seed)
-            # tr_eval_run = wandb.init(
-            #     # set the wandb project where this run will be logged
-            #     project = opt.dataset + "_exp",
-            #     # set a run name (otherwise it'll randomly assigned)
-            #     name = EXP_NAME + "_" + str(opt.batchSize) + '_seed_' + str(seed),
-            #     # track hyperparameters and run metadata
-            #     config = opt,
-            #     group = EXP_NAME + "_" + str(opt.batchSize)
-            # )
-            # config = tr_eval_run.config
-            # config.update({"n_node": n_node})
+            tr_eval_run = wandb.init(
+                # set the wandb project where this run will be logged
+                project = opt.dataset + "_exp",
+                # set a run name (otherwise it'll randomly assigned)
+                name = EXP_NAME + "_" + str(opt.batchSize) + '_seed_' + str(seed),
+                # track hyperparameters and run metadata
+                config = opt,
+                group = EXP_NAME + "_" + str(opt.batchSize)
+            )
+            config = tr_eval_run.config
+            config.update({"n_node": n_node})
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
             train_data = DataSampler(opt, train_data, opt.len_session, train=True)
             valid_data = DataSampler(opt, valid_data, opt.len_session, train=False)
-            train_loader = torch.utils.data.DataLoader(train_data, num_workers=opt.num_workers, batch_size=opt.batchSize, 
+            train_loader = torch.utils.data.DataLoader(train_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                     shuffle=True, pin_memory=False)
             valid_loader = torch.utils.data.DataLoader(valid_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                         shuffle=False, pin_memory=False)
-            
+
 
             model = SessionGraph(opt, n_node, device).to(device)
             runner = Trainer(opt.dataset, model, train_loader, valid_loader, test_loader, device, opt, model_save_file)
@@ -123,40 +123,40 @@ def main():
             final_test_result, best_model_test_result = runner.train(opt.epochs)
             end = time.time()
             print("Run time: %f s" % (end - start))
-            # tr_eval_run.finish()
+            tr_eval_run.finish()
 
     elif opt.validation:
         seed = init_seed(opt.seed)
         print(seed)
-        
+
         train_data = pickle.load(open('./datasets/' + opt.dataset + '/train.txt', 'rb'))
         train_data, valid_data = split_validation(train_data, opt.valid_portion)
         test_data = pickle.load(open('./datasets/' + opt.dataset + '/test.txt', 'rb'))
         test_data = DataSampler(opt, test_data, opt.len_session, train=False)
-        test_loader = torch.utils.data.DataLoader(test_data, num_workers=opt.num_workers, batch_size=opt.batchSize, 
+        test_loader = torch.utils.data.DataLoader(test_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                         shuffle=False, pin_memory=False)
-        
+
         model_save_file = EXP_NAME + "_" + opt.dataset + '_' + str(opt.batchSize) + '_seed_' + str(opt.seed) + '-last_k_' + str(opt.last_k)
-        # tr_eval_run = wandb.init(
-        #     # set the wandb project where this run will be logged
-        #     project = opt.dataset + "_exp",
-        #     # set a run name (otherwise it'll randomly assigned)
-        #     name = EXP_NAME + "_" + str(opt.batchSize) + '_layer_' + str(opt.step),
-        #     # track hyperparameters and run metadata
-        #     config = opt,
-        #     group = EXP_NAME + "_" + str(opt.batchSize) + '_layer'
-        # )
-        # config = tr_eval_run.config
-        # config.update({"n_node": n_node})
+        tr_eval_run = wandb.init(
+            # set the wandb project where this run will be logged
+            project = opt.dataset + "_exp",
+            # set a run name (otherwise it'll randomly assigned)
+            name = EXP_NAME + "_" + str(opt.batchSize) + '_layer_' + str(opt.step),
+            # track hyperparameters and run metadata
+            config = opt,
+            group = EXP_NAME + "_" + str(opt.batchSize) + '_layer'
+        )
+        config = tr_eval_run.config
+        config.update({"n_node": n_node})
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         train_data = DataSampler(opt, train_data, opt.len_session, train=True)
         valid_data = DataSampler(opt, valid_data, opt.len_session, train=False)
-        train_loader = torch.utils.data.DataLoader(train_data, num_workers=opt.num_workers, batch_size=opt.batchSize, 
+        train_loader = torch.utils.data.DataLoader(train_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                 shuffle=True, pin_memory=False)
         valid_loader = torch.utils.data.DataLoader(valid_data, num_workers=opt.num_workers, batch_size=opt.batchSize,
                                                     shuffle=False, pin_memory=False)
-        
+
 
         model = SessionGraph(opt, n_node, device).to(device)
         runner = Trainer(opt.dataset, model, train_loader, valid_loader, test_loader, device, opt, model_save_file)
@@ -165,7 +165,7 @@ def main():
         end = time.time()
         print("Run time: %f s" % (end - start))
 
-        # tr_eval_run.finish()
+        tr_eval_run.finish()
 
 
 if __name__ == '__main__':
