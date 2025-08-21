@@ -530,7 +530,7 @@ class SessionGraph(Module):
         q1 = self.linear_one(ht).view(ht.shape[0], 1, ht.shape[1]) # (B, 1, D)
         q2 = self.linear_two(hidden) # (B, len_max, D)
 
-        sess_global = torch.sigmoid(q1 + q2) # (B, len_max, D)
+        sess_global = torch.sigmoid(q1 + q2) # (B, len_max, D), soft attention
 
         # Atten-Mixer
         ht0 = grp_hidden[torch.arange(mask.size(0)).long(), torch.sum(mask, 1) - 1] # Get last one emb. (B, D)
@@ -558,9 +558,10 @@ class SessionGraph(Module):
         q = target_emb # (B, 1, D)
         k = att_hidden # (B, len_max, D)
         v = sess_global # (B, len_max, D)
-        global_c = self.global_attention(q, k, v, mask=mask, alpha_ent=alpha_global) # (B, 1, D)
+        global_c = self.global_attention(q, k, v, mask=mask, alpha_ent=alpha_global) # (B, 1, D),H_GAN
         # Get integrated session representations
-        sess_final = self.decoder(global_c, target_emb) # (B, D)
+        #sess_final = self.decoder(global_c, target_emb) # (B, D)
+        sess_final = global_c.squeeze(1)
 
         #sess_final = self.fusion_module(sess_final, relation_emb, grp_sess)
 

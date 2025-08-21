@@ -46,8 +46,11 @@ def evaluate(model, data_loader, device, Ks=[5, 10, 20]):
             for K in Ks:
                 hits = torch.where(sub_scores[:, :K] == (targets-1))[1] + 1
                 hits = hits.float().cpu()
+                #print(hits)
                 results[f'HR@{K}'] += hits.numel()
                 results[f'MRR@{K}'] += hits.reciprocal().sum().item()
+                #print("HR:"+str(results[f'HR@{20}']))
+                #print("MRR:"+str(results[f'MRR@{20}']))
 
         for metric in results:
             results[metric] = (results[metric] / num_samples) * 100
